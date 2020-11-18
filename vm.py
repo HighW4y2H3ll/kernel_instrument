@@ -33,6 +33,9 @@ class VM(ArchCpu):
         self.cpu = ArmCpu()
         self.cpu.load_reg(reg)
 
+    def __del__(self):
+        self._fd_mem.close()
+
     def select_base(self, va):
         if self.cpu.N == 0:
             return self.cpu.mask_ttbr0()

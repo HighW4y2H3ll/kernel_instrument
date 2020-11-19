@@ -59,9 +59,24 @@ class VM(ArchCpu):
     def _level_2_table_index(self, va):
         return (va>>12)&self.cpu.maskN(8)
 
+    def _translate_supersection(self, pd, va):
+        uh = pd&(~self.cpu.maskN(24))
+        ext = (((((pd>>5)&0xf)<<4)|((pd>>20)&0xf))<<32)
+        bh = va&self.cpu.maskN(24)
+        return ext + uh + bh
+
     def _translate_section(self, pd, va):
-        #TODO
-        raise
+        uh = pd&(~self.cpu.maskN(20))
+        bh = va&self.cpu.maskN(20)
+        return uh + bh
+
+    def __translate_sections(self, pd, va):
+        tag = pd&(1<<18)
+        if tag == 0:
+            return self._translate_section(pd, va)
+        else:
+            return self._translate_supersection(pd, va)
+
     def _translate_page_table(self, pd, va):
         pmd = pd&(~self.cpu.maskN(10))
         pmd += (self._level_2_table_index(va)<<2)
@@ -93,7 +108,7 @@ class VM(ArchCpu):
             pte = self._translate_page_table(pd, va)
             return self._translate_second_level(pte, va)
         elif tag&2 != 0:
-            return self._translate_section(pd, va)
+            return self.__translate_sections(pd, va)
         else:
             # Invalid
             return 0
@@ -110,6 +125,4 @@ if __name__ == "__main__":
     print(hex(vm.select_base(0)))
     print(hex(vm.translate(0xffff0000)))
     print(hex(vm._read_word(vm.translate(0xffff0000))))
-    print(hex(vm._read_word(vm.translate(0xffff0004))))
-    print(hex(vm._read_word(vm.translate(0xffff0008))))
-    print(hex(vm._read_word(vm.translate(0xffff000c))))
+    print(hex(vm._read_word(vm.translate(0x80101960))))

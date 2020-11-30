@@ -296,4 +296,4 @@ if __name__ == "__main__":
     print(hex(vm._read_word(vm.translate(0xffff0000))))
     print(hex(vm._read_word(vm.translate(0x80101960))))
     for e in vm.walk():
-        print hex(e[0]), hex(e[1]), hex(e[2]), e[3].check_read_pl1() and not e[3].check_read_pl0(), e[3].check_write_pl1(), e[3].check_exec()
+        print(hex(e[0]), hex(e[1]), hex(e[2]), e[3].check_read_pl1() and not e[3].check_read_pl0(), e[3].check_write_pl1(), e[3].check_exec())

@@ -288,6 +288,27 @@ class VM(ArchCpu):
             vma.update(self._walk_ttbr1())
         return vma
 
+    def page_mask(self, va):
+        pgd = self.select_base(va)
+        pmd = self._read_word(pgd + (self._level_1_table_index(va)<<2))
+        if pmd&3 == 1:
+            pte = self._translate_page_table(pmd, va)
+            if pte&3 == 1:
+                return self.cpu.maskN(16)   # large page
+            elif pte&2 != 0:
+                return self.cpu.maskN(12)   # small page
+            else:
+                # Invalid
+                return 0
+        elif pmd&2 != 0:     # section
+            if pmd&(1<<18) == 0:
+                return self.cpu.maskN(20)   # section
+            else:
+                return self.cpu.maskN(24)   # supersection
+        else:
+            # Invalid
+            return 0
+
 # Unit test
 if __name__ == "__main__":
     vm = VM("linux.reg", "linux.mem")

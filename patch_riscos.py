@@ -13,6 +13,20 @@ import capstone.bindings.python.capstone as capstone
 # The good part is we have a complete physical memory dump and register info. Thus, we can recover the memory mapping by re-walking the page table.
 
 
+# https://www.riscosopen.org/wiki/documentation/show/HAL%20OS%20layout%20and%20headers
+# /Source/Kernel/hdr/OSEntries
+# RISC OS rom image format:
+# 0 ~ 0x10000       HAL
+# 0x10000           OS image base
+
+# Regards to the Risc OS source code syntax, Ref: http://www.riscos.com/support/developers/asm/index.html
+# And also: https://www.riscosopen.org/wiki/documentation/show/A%20BASIC%20guide%20to%20ObjAsm
+
+# NOTE: Risc OS overrides undefined instruction vector for floating point instruction emulation at a later stage of bootstrap
+# the location of instrumentation (`breakpoints`) should be chosen carefully, so that the time when breakpoints are reached,
+# the undefined instruction vector should be already patched to the FPE (floating point emulation) handler
+# also NOTE: that conditional flag bits might also affected, so should not instrument at `tst`, `cmp` instructions etc.
+
 
 def patching(raw, offset, patch, addr=0):
     encoding, count = ks.asm(patch.encode(), addr)
@@ -31,9 +45,9 @@ def align(va, alignment=4):
     return ra, ra-va
 
 
-# e.g. `./patch.py linux.reg linux.mem kernel7.img 0x80000000`
+# e.g. `./patch_riscos.py riscpi.reg riscpi.mem RISCOS.IMG 0x30000000 new.img`
 if len(sys.argv) < 5:
-    print("Usage: patch.py [reg file] [mem dump] [kernel img] [kernel base vaddr]")
+    print("Usage: patch.py [reg file] [mem dump] [kernel img] [min log storage vaddr]")
     sys.exit()
 
 kernel_base = int(sys.argv[4], 16)
@@ -57,6 +71,10 @@ for va, pa, sz, prot in vma:
         excp_vec = mm._read(pa, 0x20)
         for i in cs.disasm(excp_vec, 0):
             print(i)
+        #print(hex(mm._read_word(mm.translate(0xffff0018+8+0x418))))
+        #for i in cs.disasm(mm._read(mm.translate(0xfc012900), 0x20), 0xfc012900):
+        #    print(i)
+        #sys.exit()
         i = next(cs.disasm(excp_vec[4:8], va + und_off))   # entry for _und
         print(i, hex(pa))
         if (i.mnemonic == "b"): # Linux
@@ -67,21 +85,39 @@ for va, pa, sz, prot in vma:
             print(i.op_str)
             op = re.search("pc, \[pc, #(0x[0-9a-fA-F]+)\]", i.op_str).group(1)
             print(op)
-            und_va = mm._read_word(mm.translate(va + und_off + 8 + int(op, 16)))
+            und_va = mm._read_word(mm.translate(i.address+8+int(op,16)))
+            print(hex(und_va))
+            und_va = mm._read_word(pa+i.address-va+8+int(op,16))
+            print("addr: ", hex(und_va), hex(mm.translate(und_va)))
+            i = next(cs.disasm(mm._read(mm.translate(und_va), 4), und_va))
+            print (" => ", i)
+            assert (i.mnemonic == "ldr")
+            op = re.search("pc, \[pc, #(0x[0-9a-fA-F]+)\]", i.op_str).group(1)
+            print(op)
+            und_va = mm._read_word(mm.translate(i.address)+8+int(op,16))
+            print("addr: ", hex(und_va), hex(mm.translate(und_va)))
+            i = next(cs.disasm(mm._read(mm.translate(und_va), 4), und_va))
+            print (" ==> ", i)
+            assert (i.mnemonic == "ldr")
+            op = re.search("pc, \[pc, #((0x)?[\-0-9a-fA-F]+)\]", i.op_str).group(1)
+            print(op)
+            assert ("0x" not in op)
+            und_va = mm._read_word(mm.translate(i.address)+8+int(op))
+            print("addr: ", hex(und_va), hex(mm.translate(und_va)))
     if prot.check_exec() and va > kernel_base:
         page = mm._read(pa, sz)
-        for nullpad in re.finditer(b"(\x00+)", page):
+        for nullpad in re.finditer(b"(\xff+)", page):
             # bid for the largest null padding
-            if len(nullpad.group()) > 0x200 and main_patch_size < len(nullpad.group()):
+            if len(nullpad.group()) > 0x100 and main_patch_size < len(nullpad.group()):
                 print("exec: ", [hex(va+x) for x in nullpad.span()])
                 sig = mm._read(pa, nullpad.start())
                 koff = kernel_data.find(sig)
                 print(len(sig))
                 print(hex(koff))
-                if koff != -1:
-                    main_patch_off = koff+nullpad.start()
-                    main_patch_size = len(nullpad.group())
-                    main_patch_vaddr = va+nullpad.start()
+                if len(sig) > 0 and koff != -1:
+                    main_patch_off, adj = align(koff+nullpad.start())
+                    main_patch_size = len(nullpad.group()) - adj
+                    main_patch_vaddr = va+nullpad.start() + adj
     # hopefully, something safe
     if prot.check_write() and va > kernel_base and ((va^kernel_base)>>24) == 0:
         page = mm._read(pa, sz)
@@ -92,6 +128,10 @@ for va, pa, sz, prot in vma:
                 storage_size = len(nullpad.group()) - adj
 
 assert(und_va)
+# RiscOS:      va       ->   pa         ->   kernel img offset
+#              0xfc000000    0x3bb00000      0
+#              0xfc4f3b30    0x3bff3b30      0x4f3b30               : End of ROM Image (\xff) padding (for 2/4/6/8 MB alignment)
+print("patch exec: ", hex(main_patch_vaddr), hex(mm.translate(main_patch_vaddr)))
 
 # Find initial und handler to patch a trampline
 und_handle = None
@@ -119,7 +159,7 @@ patchset = {}
 ks = keystone.Ks(keystone.KS_ARCH_ARM, keystone.KS_MODE_ARM|keystone.KS_MODE_LITTLE_ENDIAN)
 
 # Define breakpoints
-breakpoints = [0x80102154, 0x8010ff9c]
+breakpoints = [0xfc271cf8]
 oldbytes = []
 for bp in breakpoints:
     kern_off = None
@@ -142,6 +182,12 @@ for bp in breakpoints:
                 (0x8000+match.start())&mm.page_mask(bp) == bp&mm.page_mask(bp): # Raspi kernel base might starts at 0x8000
             assert (not kern_off)   # should have only one match
             kern_off = match.start()
+    # some might not be aligned (e.g. RiscOS)
+    if not kern_off:
+        for match in re.finditer(b2pat(sig), kernel_data):
+            print(" >>", hex(bp), " : ", [hex(x) for x in match.span()])
+            assert (not kern_off)
+            kern_off = match.start()
 
     assert (kern_off)   # should find the match now
     oldbytes.append(",".join([hex(c) for c in kernel_data[kern_off:kern_off+4]]))
@@ -149,6 +195,7 @@ for bp in breakpoints:
     print(oldbytes[-1])
     print(kernel_data[kern_off:kern_off+4])
     patchset[kern_off] = patching(kernel_data, kern_off, ".word 0xe7fddef1")
+    #patchset[kern_off+4] = patching(kernel_data, kern_off+4, "b $.;")
 
 #sys.exit()
 
@@ -160,12 +207,21 @@ for bp in breakpoints:
 #patchset[patch_off] = patching(kernel_data, patch_off, ".word {}".format(hex(main_patch_vaddr)))
 patch_off = und_kernimg_off
 patchset[patch_off] = patching(kernel_data, patch_off,
+        #"b $.;"
+        #"stmdb sp!, {{r0-r3}};"
+        #"mrc p15, 0, r0, c1, c0, 0;"
+        #"tst r0, #1;"
         "ldr pc, $.Ldispat;"
         ".Ldispat:"
-        ".word {};".format(hex(main_patch_vaddr)), und_va)
+        ".word {DISPATCH_VADDR};".format(
+            DISPATCH_VADDR=hex(main_patch_vaddr),
+            DISPATCH_PADDR=hex(mm.translate(main_patch_vaddr)),
+            ), und_va)
 tramp_orig_bytes = patchset[patch_off][1]
 tramp_orig_rest = und_va + len(tramp_orig_bytes)
 
+#print(hex(und_va))
+#print(hex(und_kernimg_off))
 #sys.exit()
 
 # Patch main dispatcher

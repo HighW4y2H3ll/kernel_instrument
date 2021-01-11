@@ -120,9 +120,11 @@ patchset = {}
 ks = keystone.Ks(keystone.KS_ARCH_ARM, keystone.KS_MODE_ARM|keystone.KS_MODE_LITTLE_ENDIAN)
 
 # Define breakpoints
-# Untagged: bcm_vchiq_intr, bcm_dma_intr, bcm_mbox_intr,
-# uart_intr, bcm_gpio_intr_bank0, bcm_gpio_intr_bank1, bcm_systimer_intr ...
-breakpoints = [0xc0140dbc, 0xc069a948, 0xc069a960]
+# Untagged: bcm_vchiq_intr, bcm_dma_intr, bcm_mbox_intr, bcm_sdhci_intr, (dwc_otg_interrupt), (bcmrng)
+# uart_intr, bcm_gpio_intr_bank0, bcm_gpio_intr_bank1, dwc_otg_filter_interrupt, pmu_intr, arm_tmr_intr
+breakpoints = [0xc0140dbc, 0xc069a948, 0xc069a960, 0xc014fbb8, 0xc065c9d4, 0xc06410c4]
+# IPI: should ignore? general entry: intr_ipi_dispatch
+breakpoints.extend([0xc06496b8])
 oldbytes = []
 for bp in breakpoints:
     kern_off = None

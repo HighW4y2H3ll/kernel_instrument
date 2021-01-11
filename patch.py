@@ -119,7 +119,13 @@ patchset = {}
 ks = keystone.Ks(keystone.KS_ARCH_ARM, keystone.KS_MODE_ARM|keystone.KS_MODE_LITTLE_ENDIAN)
 
 # Define breakpoints
-breakpoints = [0x80102154, 0x8010ff9c]
+# request_percpu_irq: arch_timer_handler_phys, armpmu_dispatch_irq, 
+breakpoints = [0x806ae118, 0x806df590]
+# request_irq: bcm2708_fb_dma_irq, dwc_otg_common_irq, dwc_otg_pcd_irq, usb_hcd_irq, bcm2835_dma_callback, bcm2835_sdhost_irq, pl011_int
+breakpoints.extend([0x8054a274, 0x806325ec, 0x80640800, 0x8061d9f4, 0x8055efdc, 0x806a8520, 0x805953f4])
+# handle_IPI
+breakpoints.extend([0x8010ff9c])
+
 oldbytes = []
 for bp in breakpoints:
     kern_off = None

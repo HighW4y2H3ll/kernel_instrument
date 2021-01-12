@@ -148,6 +148,7 @@ for i in cs.disasm(sig, und_va):
 und_kernimg_off = None
 for match in re.finditer(b2pat(sig), kernel_data):
     print([hex(x) for x in match.span()])
+    assert (not und_kernimg_off)
     und_kernimg_off = match.start()
 assert(und_kernimg_off)
 print(hex(und_kernimg_off))
@@ -159,7 +160,11 @@ patchset = {}
 ks = keystone.Ks(keystone.KS_ARCH_ARM, keystone.KS_MODE_ARM|keystone.KS_MODE_LITTLE_ENDIAN)
 
 # Define breakpoints
-breakpoints = [0xfc271cf8]
+# REed: iDev_GPU_Timer1, iDev_GPU_VCDMA2, iDev_GPU_DMA4, iDev_GPU_DMA5, iDev_GPU_DMA8, iDev_GPU_DMA9, iDev_GPU_DMA10, iDev_GPU_DMA11_14(shared irq), iDev_GPU_HostPort, iDev_GPU_SMI, iDev_GPU_SDIO, iDev_GPU_Uart, iDev_ARM_Timer, iDev_ARM_Mbx, iDev_ARM_DBell0
+breakpoints = [0xfc012ce0, 0x20049dbc, 0x20049e2c, 0x20049e9c, 0x20049f0c, 0x20049f7c, 0x20049fec, 0x2004a1ac, 0xfc207944, 0xfc2356c4, 0x200a38f4, 0xfc30742c, 0xfc2358b8, 0xfc1f58bc, 0xfc225910]
+# Dummy: IRQ
+breakpoints.append(0xfc012c34)
+
 oldbytes = []
 for bp in breakpoints:
     kern_off = None
@@ -324,6 +329,96 @@ patchset[patch_off] = patching(kernel_data, patch_off,
                 )
         , main_patch_vaddr)
 
+
+# Second round, We've only patched VFP emulation, Now to patch the default UNDEF
+und_va = 0xfc028fe4     # Found through JTAG: mdw 0xffff0120
+main_patch_vaddr += 0x400   # Another dispatcher
+main_patch_off += 0x400
+und_handle = None
+und_off = mm.translate(und_va)
+print(hex(und_off))
+sig = mm._read(und_off, 0x1000)
+for i in cs.disasm(sig, und_va):
+    print (i)
+    # check when overwrites pc
+    if i.op_str.startswith("pc,"):
+        sig = sig[:i.address-und_va+i.size]
+        break
+
+und_kernimg_off = None
+for match in re.finditer(b2pat(sig), kernel_data):
+    print([hex(x) for x in match.span()])
+    assert (not und_kernimg_off)
+    und_kernimg_off = match.start()
+assert(und_kernimg_off)
+print(hex(und_kernimg_off))
+
+patch_off = und_kernimg_off
+patchset[patch_off] = patching(kernel_data, patch_off,
+        #"b $.;"
+        #"stmdb sp!, {{r0-r3}};"
+        #"mrc p15, 0, r0, c1, c0, 0;"
+        #"tst r0, #1;"
+        "ldr pc, $.Ldispat;"
+        ".Ldispat:"
+        ".word {DISPATCH_VADDR};".format(
+            DISPATCH_VADDR=hex(main_patch_vaddr),
+            DISPATCH_PADDR=hex(mm.translate(main_patch_vaddr)),
+            ), und_va)
+tramp_orig_bytes = patchset[patch_off][1]
+tramp_orig_rest = und_va + len(tramp_orig_bytes)
+
+patch_off = main_patch_off
+patchset[patch_off] = patching(kernel_data, patch_off,
+        "stmdb sp!, {{r0-r3}};"
+
+        "adr r0, .Lbp;"         # verify breakpoints
+        "sub r2, r2, r2;"
+
+        ".Lloop:"
+        "ldr r3, [r0, r2, LSL#2];"
+        "adds r3, r3, #0;"      # - check end of list (breakpoints)
+        "beq .Lund;"
+        "add r3, r3, #4;"       # (assume arm mode, lr will be the next inst after the breakpoint) check thumb?
+        "teq r3, lr;"           # - check breakpoint match
+        "beq .Lupdate;"
+        "add r2, r2, #1;"
+        "b .Lloop;"
+
+        ".Lupdate:"             # update hit counter
+
+        "adr lr, .Lstub;"       # start restore
+        "add lr, lr, r2, LSL#4;"# find stub (@r2: bp index)
+        "ldmia sp!, {{r0-r3}};"
+        "movs pc, lr;"          # trigger context switch
+
+        ".Lund:"                # und faulting - have to restore the original und_excp handler here
+        "ldmia sp!, {{r0-r3}};" # Linux init proc invokes und inst on boot, probably breakpoint setup
+        ".byte {ORIG_UND_VEC};"
+        "ldr pc, [pc, #-4];"
+        ".word {ORIG_UND_REST};"
+        "b $.;"
+
+        ".Lstub:"               # stub for the original inst replaced by breakpoint
+        #"mov r12, sp;"         # NOTE: at this point the only register got messed up is PC (r15),
+        #"ldr pc, [pc, #-4];"   #       be careful with PC relative load/store/branch etc.
+        #".word {BP Return Addr};"
+        #"b $.;"
+        "{STUB}"
+        ".Lbp:"                 # null-ended list of breakpoint address
+        ".word {BREAKPOINTS};"
+        ".word 0;".format(
+                ORIG_UND_VEC=",".join([hex(c) for c in tramp_orig_bytes]),
+                ORIG_UND_REST=hex(tramp_orig_rest),
+                BREAKPOINTS=",".join([hex(p) for p in breakpoints]),
+                STUB="".join([".byte {};ldr pc, [pc, #-4];.word {};b $.;".format(b,r+4) for b,r in zip(oldbytes,breakpoints)])
+                )
+        , main_patch_vaddr)
+
+
+
+
+# All Done, now output
 print("storage address: ", hex(storage_vaddr))
 
 if len(sys.argv) > 5:

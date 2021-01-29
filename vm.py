@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+import sys
+import yaml
 import struct
 
 class ArchCpu(object):
@@ -10,16 +12,35 @@ class ArchCpu(object):
 
 class ArmCpu(ArchCpu):
     def load_reg(self, reg):
-        regs = {}
-        for line in open(reg, 'r'):
-            k, _, v = line.strip().split()
-            regs[k] = int(v, 0)
-        self.ttbr0 = regs['translation_table_base_0_0']
-        self.ttbr1 = regs['translation_table_base_1_0']
-        self.ttbcr = regs['translation_table_base_control_0']
-        self.sctlr = regs['control_0']
-        self.prrr  = regs['primary_region_remap_register_0']
-        self.nmrr  = regs['normal_memory_remap_register_0']
+        if reg.endswith(".yaml"):
+            with open(reg, 'r') as fd:
+                regs = yaml.load(fd, Loader=yaml.FullLoader)
+            self._physical_mem_base = 0
+            self.features = regs['features']
+            if self.features == 0x900dac019:    # arm1176
+                self._physical_mem_base = 0x80000000
+            self.ttbr0 = regs['cp15.ttbr0_el'][3]
+            self.ttbr1 = regs['cp15.ttbr1_el'][3]
+            #self.sctlr = regs['cp15.sctlr_el'][3]
+            self.sctlr = 0
+            self.ttbcr = 0
+            self.prrr = 0
+            self.nmrr = 0
+        else:
+            regs = {}
+            for line in open(reg, 'r'):
+                k, _, v = line.strip().split()
+                regs[k] = int(v, 0)
+            self._physical_mem_base = 0
+            self.features = regs['main_id_0']
+            if self.features == 0x413fc082:     # beaglebone
+                self._physical_mem_base = 0x80000000
+            self.ttbr0 = regs['translation_table_base_0_0']
+            self.ttbr1 = regs['translation_table_base_1_0']
+            self.ttbcr = regs['translation_table_base_control_0']
+            self.sctlr = regs['control_0']
+            self.prrr  = regs['primary_region_remap_register_0']
+            self.nmrr  = regs['normal_memory_remap_register_0']
 
         # Auxiliary
         self.N = self.ttbcr&7
@@ -105,6 +126,7 @@ class VM(ArchCpu):
             return self.cpu.mask_ttbr1()
 
     def _read(self, off, sz):
+        off -= self.cpu._physical_mem_base
         self._fd_mem.seek(off)
         return self._fd_mem.read(sz)
 
@@ -311,10 +333,11 @@ class VM(ArchCpu):
 
 # Unit test
 if __name__ == "__main__":
-    vm = VM("linux.reg", "linux.mem")
+    #vm = VM("linux.reg", "linux.mem")
+    vm = VM(sys.argv[1], sys.argv[2])
     print(hex(vm.select_base(0)))
     print(hex(vm.translate(0xffff0000)))
     print(hex(vm._read_word(vm.translate(0xffff0000))))
-    print(hex(vm._read_word(vm.translate(0x80101960))))
+    #print(hex(vm._read_word(vm.translate(0x80101960))))
     for e in vm.walk():
         print(hex(e[0]), hex(e[1]), hex(e[2]), e[3].check_read_pl1() and not e[3].check_read_pl0(), e[3].check_write_pl1(), e[3].check_exec())

@@ -123,6 +123,8 @@ ks = keystone.Ks(keystone.KS_ARCH_ARM, keystone.KS_MODE_ARM|keystone.KS_MODE_LIT
 breakpoints = [0x806ae118, 0x806df590]
 # request_irq: bcm2708_fb_dma_irq, dwc_otg_common_irq, dwc_otg_pcd_irq, usb_hcd_irq, bcm2835_dma_callback, bcm2835_sdhost_irq, pl011_int
 breakpoints.extend([0x8054a274, 0x806325ec, 0x80640800, 0x8061d9f4, 0x8055efdc, 0x806a8520, 0x805953f4])
+# devm_request_irq: vchiq_doorbell_irq, bcm2835_mbox_irq
+breakpoints.extend([0x806dbc00, 0x806df250])
 # handle_IPI
 breakpoints.extend([0x8010ff9c])
 

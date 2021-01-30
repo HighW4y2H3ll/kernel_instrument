@@ -14,7 +14,8 @@ class ArmCpu(ArchCpu):
     def load_reg(self, reg):
         if reg.endswith(".yaml"):
             with open(reg, 'r') as fd:
-                regs = yaml.load(fd, Loader=yaml.FullLoader)
+                #regs = yaml.load(fd, Loader=yaml.FullLoader)
+                regs = yaml.safe_load(fd)
             self._physical_mem_base = 0
             self.features = regs['features']
             if self.features == 0x900dac019:    # arm1176

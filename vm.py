@@ -11,15 +11,12 @@ class ArchCpu(object):
         return (1<<n)-1
 
 class ArmCpu(ArchCpu):
-    def load_reg(self, reg):
+    def __init__(self, reg, mem_base=0):
+        self._physical_mem_base = mem_base
         if reg.endswith(".yaml"):
             with open(reg, 'r') as fd:
                 #regs = yaml.load(fd, Loader=yaml.FullLoader)
                 regs = yaml.safe_load(fd)
-            self._physical_mem_base = 0
-            self.features = regs['features']
-            if self.features == 0x900dac019:    # arm1176
-                self._physical_mem_base = 0x80000000
             self.ttbr0 = regs['cp15.ttbr0_el'][3]
             self.ttbr1 = regs['cp15.ttbr1_el'][3]
             #self.sctlr = regs['cp15.sctlr_el'][3]
@@ -32,10 +29,6 @@ class ArmCpu(ArchCpu):
             for line in open(reg, 'r'):
                 k, _, v = line.strip().split()
                 regs[k] = int(v, 0)
-            self._physical_mem_base = 0
-            self.features = regs['main_id_0']
-            if self.features == 0x413fc082:     # beaglebone
-                self._physical_mem_base = 0x80000000
             self.ttbr0 = regs['translation_table_base_0_0']
             self.ttbr1 = regs['translation_table_base_1_0']
             self.ttbcr = regs['translation_table_base_control_0']
@@ -108,11 +101,9 @@ class Permission(object):
 # Ref: https://developer.arm.com/documentation/ddi0406/cb/System-Level-Architecture/Virtual-Memory-System-Architecture--VMSA-/Short-descriptor-translation-table-format/Short-descriptor-translation-table-format-descriptors
 # Short-format support only
 class VM(ArchCpu):
-    def __init__(self, reg, mem):
+    def __init__(self, reg, mem, mem_base=0):
         self._fd_mem = open(mem, 'rb')
-
-        self.cpu = ArmCpu()
-        self.cpu.load_reg(reg)
+        self.cpu = ArmCpu(reg,mem_base)
 
     def __del__(self):
         self._fd_mem.close()

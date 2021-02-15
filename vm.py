@@ -17,8 +17,11 @@ class ArmCpu(ArchCpu):
             with open(reg, 'r') as fd:
                 #regs = yaml.load(fd, Loader=yaml.FullLoader)
                 regs = yaml.safe_load(fd)
-            self.ttbr0 = regs['cp15.ttbr0_el'][3]
-            self.ttbr1 = regs['cp15.ttbr1_el'][3]
+            for i in range(4):
+                self.ttbr0 = regs['cp15.ttbr0_el'][i]
+                self.ttbr1 = regs['cp15.ttbr1_el'][i]
+                if self.ttbr0 != 0 and self.ttbr1 != 0:
+                    break
             #self.sctlr = regs['cp15.sctlr_el'][3]
             self.sctlr = 0
             self.ttbcr = 0
@@ -326,8 +329,9 @@ class VM(ArchCpu):
 # Unit test
 if __name__ == "__main__":
     #vm = VM("linux.reg", "linux.mem")
-    vm = VM(sys.argv[1], sys.argv[2])
+    vm = VM(sys.argv[1], sys.argv[2], 0 if len(sys.argv)>3 else int(sys.argv[3],16))
     print(hex(vm.select_base(0)))
+    print(hex(vm.translate(0x20018)))
     print(hex(vm.translate(0xffff0000)))
     print(hex(vm._read_word(vm.translate(0xffff0000))))
     #print(hex(vm._read_word(vm.translate(0x80101960))))

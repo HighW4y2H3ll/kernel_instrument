@@ -130,7 +130,7 @@ class VM(ArchCpu):
         return struct.unpack('<I', x)[0]
 
     def _level_1_table_index(self, va):
-        return (va>>20)&self.cpu.maskN(12-self.cpu.N)
+        return (va>>20)&self.cpu.maskN(12)
 
     def _level_2_table_index(self, va):
         return (va>>12)&self.cpu.maskN(8)
@@ -329,9 +329,10 @@ class VM(ArchCpu):
 # Unit test
 if __name__ == "__main__":
     #vm = VM("linux.reg", "linux.mem")
-    vm = VM(sys.argv[1], sys.argv[2], 0 if len(sys.argv)>3 else int(sys.argv[3],16))
+    vm = VM(sys.argv[1], sys.argv[2], int(sys.argv[3],16) if len(sys.argv)>3 else 0)
     print(hex(vm.select_base(0)))
-    print(hex(vm.translate(0x20018)))
+    #print(hex(vm.translate(0x20018)))
+    print(hex(vm.translate(0x91002364)))
     print(hex(vm.translate(0xffff0000)))
     print(hex(vm._read_word(vm.translate(0xffff0000))))
     #print(hex(vm._read_word(vm.translate(0x80101960))))

@@ -14,6 +14,31 @@ class ArchCpu(object):
     def page_mask(self, va, vm):
         raise
 
+class MipsCpu(ArchCpu):
+    def __init__(self, reg, mem_base=0):
+        self._physical_mem_base = mem_base
+        self._kseg0 = 0x80000000
+        self._kseg1 = 0xa0000000
+        self._kseg2 = 0xc0000000
+
+    def translate(self, va, vm):
+        if (va >= self._kseg0) and (va < self._kseg2):
+            return va - self._kseg0
+        # otherwise, need to emulate tlbr excp
+        from mips_tlbemu import translate
+        return translate(vm._mem, va)
+
+    def walk(self, vm):
+        from mips_tlbemu import translate
+        vma = set()
+        for va in range(0x80000000, 0x90000000, 0x1000):
+            vma.add((va, va-self._kseg0, 0x1000, None))
+        for va in range(0xc0000000, 0xc1000000, 0x1000):
+            pa = translate(vm._mem, va)
+            if pa != 0:
+                vma.add((va, pa, 0x1000, None))
+        return vma
+
 # Ref: https://developer.arm.com/documentation/ddi0406/cb/System-Level-Architecture/Virtual-Memory-System-Architecture--VMSA-/Short-descriptor-translation-table-format/Short-descriptor-translation-table-format-descriptors
 # Short-format support only
 class ArmCpu(ArchCpu):
@@ -321,6 +346,7 @@ class VM(ArchCpu):
             self.cpu = ArmCpu(reg,mem_base)
         elif arch == 'mipsel32':
             self.cpu = MipsCpu(reg,mem_base)
+            self._mem = self._fd_mem.read()
         else:
             self.cpu = None
         assert (self.cpu)
